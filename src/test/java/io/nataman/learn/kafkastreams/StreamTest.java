@@ -53,6 +53,7 @@ class StreamTest {
   private static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
   private static final String CHANGE_LOG_TOPIC = "lks-correlation-store-changelog";
 
+  @SuppressWarnings("SpringJavaAutowiredMembersInspection")
   @Autowired private EmbeddedKafkaBroker embeddedKafkaBroker;
 
   private BlockingQueue<ConsumerRecord<String, String>> bookingRequestQueue =
@@ -74,7 +75,7 @@ class StreamTest {
     consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
     var cf = new DefaultKafkaConsumerFactory<String, String>(consumerProps);
     ContainerProperties containerProperties = new ContainerProperties(topicName);
-    var container = new KafkaMessageListenerContainer<String, String>(cf, containerProperties);
+    var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
     container.setupMessageListener((MessageListener<String, String>) queue::add);
     container.start();
     //ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
@@ -107,9 +108,9 @@ class StreamTest {
 
   @AfterEach
   void stop() {
+    context.close();
     bookingRequestContainer.stop();
     changeLogContainer.stop();
-    context.close();
   }
 
   @SneakyThrows
@@ -137,7 +138,8 @@ class StreamTest {
   @SneakyThrows
   private void dumpRecords(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue, int expectedCount) {
-    var record = queue.poll(3, TimeUnit.SECONDS);
+    var record = queue.poll(1, TimeUnit.SECONDS);
+    assertThat(record).isNotNull();
     log.debug("\nTOPIC: {}\n{}: {}", topicName, record.key(), record.value());
   }
 

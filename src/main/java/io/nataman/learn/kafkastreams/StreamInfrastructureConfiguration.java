@@ -1,6 +1,7 @@
 package io.nataman.learn.kafkastreams;
 
 import java.util.Map;
+import java.util.Objects;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
@@ -11,12 +12,13 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
+import org.springframework.cloud.stream.binder.kafka.streams.SendToDlqAndContinue;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.KafkaStreamsInfrastructureCustomizer;
 import org.springframework.kafka.config.StreamsBuilderFactoryBeanCustomizer;
+import org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler;
 
-@SuppressWarnings({"rawtypes", "unchecked"})
 @Log4j2
 @Configuration(proxyBeanMethods = false)
 public class StreamInfrastructureConfiguration {
@@ -35,21 +37,20 @@ public class StreamInfrastructureConfiguration {
   StreamsBuilderFactoryBeanCustomizer customizer(
       KafkaStreamsInfrastructureCustomizer infrastructureCustomizer,
       StateRestoreListener stateRestoreListener,
-      KafkaClientSupplier kafkaClientSupplier) {
+      KafkaClientSupplier kafkaClientSupplier,
+      SendToDlqAndContinue sendToDlqAndContinue) {
     return factoryBean -> {
-      var streamConfiguration = factoryBean.getStreamsConfiguration();
+      var streamConfiguration = Objects.requireNonNull(factoryBean.getStreamsConfiguration());
       streamConfiguration.put(
           StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE);
       streamConfiguration.put(
           StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
-      /*
       streamConfiguration.put(
           StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
           RecoveringDeserializationExceptionHandler.class);
       streamConfiguration.put(
           RecoveringDeserializationExceptionHandler.KSTREAM_DESERIALIZATION_RECOVERER,
           sendToDlqAndContinue);
-       */
       log.debug("streamsConfiguration: {}", streamConfiguration);
       factoryBean.setStreamsConfiguration(streamConfiguration);
       factoryBean.setInfrastructureCustomizer(infrastructureCustomizer);
