@@ -12,7 +12,6 @@ import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.Produced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Log4j2
 @Configuration(proxyBeanMethods = false)
@@ -30,13 +29,12 @@ class StreamConfiguration {
           final KeyValueMapper<
                   PostingRequestedEvent, BookingRequest, KeyValue<String, CorrelationEntry>>
               requestCorrelationMapper) {
-    var jsonSerde = new JsonSerde<CorrelationEntry>().noTypeInfo();
     return input -> {
       var bookingRequestStream =
           input.map(bookingRequestMapper, Named.as("booking-request-mapper"));
       bookingRequestStream
           .map(requestCorrelationMapper, Named.as("request-correlation-mapper"))
-          .to(CORRELATION_TOPIC);
+          .to(CORRELATION_TOPIC, Produced.as("store-correlation-sink"));
       return bookingRequestStream.selectKey(
           (key, value) -> value.getBookingRequestId(), Named.as("select-key-booking-id"));
     };
@@ -67,7 +65,7 @@ class StreamConfiguration {
       // delete the correlated entry
       correlatedStream
           .map(responseCorrelationMapper, Named.as("response-correlation-mapper"))
-          .to(CORRELATION_TOPIC);
+          .to(CORRELATION_TOPIC, Produced.as("purge-correlation-sink"));
 
       // send response to posting
       return correlatedStream.map(bookingResponseMapper, Named.as("booking-response-mapper"));

@@ -45,7 +45,7 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
     brokerProperties = {
       "transaction.state.log.replication.factor=1",
       "transaction.state.log.min.isr=1",
-      "metadata.max.age.ms=1000",
+      "metadata.max.age.ms=100",
       "auto.commit.interval.ms=100",
       "auto.create.topics.enable=false",
       "auto.leader.rebalance.enable=false",
@@ -149,20 +149,12 @@ class StreamTest {
       int minExpectedCount) {
     await()
         .atMost(2, TimeUnit.SECONDS)
-        .pollInterval(Duration.ofMillis(200))
-        .until(
-            () -> {
-              log.debug(
-                  "topicName: {}, expected={} vs actual={}",
-                  topicName,
-                  minExpectedCount,
-                  queue.size());
-              return queue.size() >= minExpectedCount;
-            });
+        .pollInterval(Duration.ofMillis(100))
+        .until(() -> queue.size() >= minExpectedCount);
     queue.forEach(
         record ->
             log.debug(
-                "\n-------  TOPIC: {}-{}-{}--------\n  Time: {}\n   Key: {}\n Value: {}\nHeader: {}\n",
+                "\n-------  TOPIC: {}-{}-{} --------\n  Time: {}\n   Key: {}\n Value: {}\nHeader: {}\n",
                 topicName,
                 record.partition(),
                 record.offset(),
@@ -173,7 +165,7 @@ class StreamTest {
   }
 
   @SneakyThrows
-  private void sendPostingRequestEvent(String paymentId, String corrId) {
+  private PostingRequestedEvent sendPostingRequestEvent(String paymentId, String corrId) {
     var event =
         PostingRequestedEvent.builder()
             .paymentUID(paymentId)
@@ -181,9 +173,10 @@ class StreamTest {
             .payload("Posting request for " + paymentId)
             .build();
     send(POSTING_REQUEST_TOPIC, paymentId, event);
+    return event;
   }
 
-  private void sendBookingResponse(final String bookingRequestId) {
+  private BookingResponse sendBookingResponse(final String bookingRequestId) {
     var response =
         BookingResponse.builder()
             .bookingRequestId(bookingRequestId)
@@ -191,6 +184,7 @@ class StreamTest {
             .payload("Booking processed for " + bookingRequestId)
             .build();
     send(BOOKING_RESPONSE_TOPIC, bookingRequestId, response);
+    return response;
   }
 
   @SneakyThrows
@@ -200,7 +194,7 @@ class StreamTest {
     var result = future.get(1, TimeUnit.SECONDS);
     assertThat(result).isNotNull();
     log.debug(
-        "\n------------ TEST DATA {}-{}-{} ----\n    Time: {}\n     Key: {}\n   Value: {}\n",
+        "\n------------ TEST DATA {}-{}-{} -----------\n    Time: {}\n     Key: {}\n   Value: {}\n",
         result.topic(),
         result.partition(),
         result.offset(),
@@ -211,13 +205,32 @@ class StreamTest {
 
   @SneakyThrows
   @Test
-  void contextLoaded() {
-    sendPostingRequestEvent("payment-1", "corr-1");
+  void givenPostingRequest_whenBookingResponse_thenPostingConfirmedEvent() {
+    // given
+    var postingRequestedEvent = sendPostingRequestEvent("payment-1", "corr-1");
+
     assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
     assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
+
     var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
+    var correlationEntry = getObjectFromQueue(correlationLogQueue, CorrelationEntry.class);
+
+    assertThat(bookingRequest.getBookingRequestId())
+        .isEqualTo(postingRequestedEvent.getPaymentUID() + "-b");
+    assertThat(correlationEntry.getCorrelationId())
+        .isEqualTo(postingRequestedEvent.getCorrelationId());
+    assertThat(correlationEntry.getPaymentUID()).isEqualTo(postingRequestedEvent.getPaymentUID());
+
+    // when
     sendBookingResponse(bookingRequest.getBookingRequestId());
+
+    // then
     assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
     assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 2);
+
+    var postingConfirmedEvent =
+        getObjectFromQueue(postingResponseQueue, PostingConfirmedEvent.class);
+    assertThat(postingConfirmedEvent.getCorrelationId())
+        .isEqualTo(postingRequestedEvent.getCorrelationId());
   }
 }
