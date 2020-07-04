@@ -10,6 +10,7 @@ import lombok.Value;
 class PostingRequestedEvent {
   @Default
   long eventTime = Instant.now().toEpochMilli();
+  String paymentUID;
   String correlationId;
   String payload;
 }

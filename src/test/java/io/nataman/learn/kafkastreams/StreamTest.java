@@ -1,14 +1,15 @@
 package io.nataman.learn.kafkastreams;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.vavr.CheckedConsumer;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -33,6 +34,7 @@ import org.springframework.kafka.listener.KafkaMessageListenerContainer;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
@@ -43,28 +45,33 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
     partitions = 1,
     brokerProperties = {
       "transaction.state.log.replication.factor=1",
-      "transaction.state.log.min.isr=1"
+      "transaction.state.log.min.isr=1",
+      "metadata.max.age.ms=1000",
+      "auto.commit.interval.ms=100",
+      "auto.create.topics.enable=false",
+      "auto.leader.rebalance.enable=false",
+      "linger.ms=100"
     },
     topics = {
       "orchestrator.posting.request",
       "posting.booking.request",
-      "posting-service-correlation-store-changelog",
       "booking.posting.response",
-      "posting.orchestrator.response"
+      "posting.orchestrator.response",
+      "posting-booking-correlation-log"
     })
 class StreamTest {
   private static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
   private static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
   private static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
   private static final String BOOKING_RESPONSE_TOPIC = "booking.posting.response";
-  private static final String CHANGE_LOG_TOPIC = "posting-service-correlation-store-changelog";
+  private static final String CORRELATION_LOG_TOPIC = "posting-booking-correlation-log";
 
-  private final BlockingQueue<ConsumerRecord<String, String>> bookingRequestQueue =
-      new LinkedBlockingQueue<>();
-  private final BlockingQueue<ConsumerRecord<String, String>> postingResponseQueue =
-      new LinkedBlockingQueue<>();
-  private final BlockingQueue<ConsumerRecord<String, String>> changeLogQueue =
-      new LinkedBlockingQueue<>();
+  private final LinkedTransferQueue<ConsumerRecord<String, String>> bookingRequestQueue =
+      new LinkedTransferQueue<>();
+  private final LinkedTransferQueue<ConsumerRecord<String, String>> postingResponseQueue =
+      new LinkedTransferQueue<>();
+  private final LinkedTransferQueue<ConsumerRecord<String, String>> correlationLogQueue =
+      new LinkedTransferQueue<>();
   private final ObjectMapper objectMapper = new ObjectMapper();
 
   @SuppressWarnings("SpringJavaAutowiredMembersInspection")
@@ -73,7 +80,7 @@ class StreamTest {
 
   private KafkaMessageListenerContainer<String, String> bookingRequestListener;
   private KafkaMessageListenerContainer<String, String> postingResponseListener;
-  private KafkaMessageListenerContainer<String, String> changeLogContainer;
+  private KafkaMessageListenerContainer<String, String> correlationLogListener;
   private ConfigurableApplicationContext context;
   private Producer<String, String> producer;
 
@@ -88,7 +95,7 @@ class StreamTest {
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
     container.setupMessageListener((MessageListener<String, String>) queue::add);
     container.start();
-    // ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+    ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
     return container;
   }
 
@@ -99,6 +106,7 @@ class StreamTest {
     return new DefaultKafkaProducerFactory<String, String>(producerProps).createProducer();
   }
 
+  @SneakyThrows
   @BeforeEach
   void start() {
     producer = createProducer();
@@ -107,7 +115,7 @@ class StreamTest {
     // response sink
     postingResponseListener = createMessageListener(POSTING_RESPONSE_TOPIC, postingResponseQueue);
     // changelog sink
-    changeLogContainer = createMessageListener(CHANGE_LOG_TOPIC, changeLogQueue);
+    correlationLogListener = createMessageListener(CORRELATION_LOG_TOPIC, correlationLogQueue);
     // spring boot app
     context =
         new SpringApplicationBuilder(KafkaStreamsApplication.class)
@@ -125,48 +133,93 @@ class StreamTest {
     context.close();
     bookingRequestListener.stop();
     postingResponseListener.stop();
-    changeLogContainer.stop();
+    correlationLogListener.stop();
   }
 
   @SneakyThrows
-  private void sendPostingRequest(String paymentId, String corrId) {
-    var event =
-        PostingRequestedEvent.builder()
-            .correlationId(corrId)
-            .payload("Posting request for " + paymentId)
-            .build();
-    var future =
-        producer.send(
-            new ProducerRecord<>(
-                POSTING_REQUEST_TOPIC, paymentId, objectMapper.writeValueAsString(event)));
-    var result = future.get(1, TimeUnit.SECONDS);
-    assertThat(result).isNotNull();
-    log.debug(
-        "sendPostingRequest: metadata: {} {}-{}-{}",
-        Instant.ofEpochMilli(result.timestamp()),
-        result.topic(),
-        result.partition(),
-        result.offset());
+  private <T> T getObjectFromQueue(
+      LinkedTransferQueue<ConsumerRecord<String, String>> queue, Class<T> targetType) {
+    var record = Objects.requireNonNull(queue.peek()).value();
+    return objectMapper.readValue(record, targetType);
   }
 
   @SneakyThrows
-  private void dumpRecords(
-      String topicName, BlockingQueue<ConsumerRecord<String, String>> queue, int expectedCount) {
-    CheckedConsumer<Integer> readQueue =
-        i -> {
-          var record = queue.poll(2, TimeUnit.SECONDS);
-          assertThat(record).isNotNull();
-          log.debug("\nTOPIC: {}\n{}: {}", topicName, record.key(), record.value());
-        };
+  private void assertSizeAndLogRecord(
+      String topicName,
+      LinkedTransferQueue<ConsumerRecord<String, String>> queue,
+      int minExpectedCount) {
 
-    Stream.iterate(0, n -> n++).limit(expectedCount).forEach(readQueue.unchecked());
+    await()
+        .atMost(20, TimeUnit.SECONDS)
+        .pollInterval(Duration.ofSeconds(1))
+        .until(
+            () -> {
+              log.debug(
+                  "topicName: {}, expected={} vs actual={}",
+                  topicName,
+                  minExpectedCount,
+                  queue.size());
+              return queue.size() >= minExpectedCount;
+            });
+    queue.forEach(
+        record ->
+            log.debug(
+                "\n\n-------  TOPIC: {}-{}-{}--------\n  Time: {}\n   Key: {}\n Value: {}\nHeader: {}",
+                topicName,
+                record.partition(),
+                record.offset(),
+                Instant.ofEpochMilli(record.timestamp()),
+                record.key(),
+                record.value(),
+                record.headers()));
   }
 
   @SneakyThrows
   @Test
   void contextLoaded() {
-    sendPostingRequest("payment-1", "corr-1");
-    dumpRecords(CHANGE_LOG_TOPIC, changeLogQueue, 1);
-    dumpRecords(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
+    sendPostingRequestEvent("payment-1", "corr-1");
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
+    assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
+    var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
+    sendBookingResponse(bookingRequest.getBookingRequestId());
+    assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 0);
+  }
+
+  @SneakyThrows
+  private void sendPostingRequestEvent(String paymentId, String corrId) {
+    var event =
+        PostingRequestedEvent.builder()
+            .paymentUID(paymentId)
+            .correlationId(corrId)
+            .payload("Posting request for " + paymentId)
+            .build();
+    send(POSTING_REQUEST_TOPIC, paymentId, event);
+  }
+
+  private void sendBookingResponse(final String bookingRequestId) {
+    var response =
+        BookingResponse.builder()
+            .bookingRequestId(bookingRequestId)
+            .status(Status.SUCCESS)
+            .payload("Booking processed for " + bookingRequestId)
+            .build();
+    send(BOOKING_RESPONSE_TOPIC, bookingRequestId, response);
+  }
+
+  @SneakyThrows
+  private void send(String topic, String key, Object value) {
+    var future =
+        producer.send(new ProducerRecord<>(topic, key, objectMapper.writeValueAsString(value)));
+    var result = future.get(1, TimeUnit.SECONDS);
+    assertThat(result).isNotNull();
+    log.debug(
+        "\n------------ TEST DATA {}-{}-{} ----\n    Time: {}\n     Key: {}\n   Value: {}",
+        result.topic(),
+        result.partition(),
+        result.offset(),
+        Instant.ofEpochMilli(result.timestamp()),
+        key,
+        value);
   }
 }
