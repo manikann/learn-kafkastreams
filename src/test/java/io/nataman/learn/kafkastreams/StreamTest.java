@@ -36,6 +36,7 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
+@SuppressWarnings("SameParameterValue")
 @Log4j2
 @ExtendWith(SpringExtension.class)
 @EmbeddedKafka(
@@ -47,26 +48,33 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
     topics = {
       "orchestrator.posting.request",
       "posting.booking.request",
-      "lks-correlation-store-changelog"
+      "posting-service-correlation-store-changelog",
+      "booking.posting.response",
+      "posting.orchestrator.response"
     })
 class StreamTest {
   private static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
+  private static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
   private static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
-  private static final String CHANGE_LOG_TOPIC = "lks-correlation-store-changelog";
+  private static final String BOOKING_RESPONSE_TOPIC = "booking.posting.response";
+  private static final String CHANGE_LOG_TOPIC = "posting-service-correlation-store-changelog";
+
+  private final BlockingQueue<ConsumerRecord<String, String>> bookingRequestQueue =
+      new LinkedBlockingQueue<>();
+  private final BlockingQueue<ConsumerRecord<String, String>> postingResponseQueue =
+      new LinkedBlockingQueue<>();
+  private final BlockingQueue<ConsumerRecord<String, String>> changeLogQueue =
+      new LinkedBlockingQueue<>();
+  private final ObjectMapper objectMapper = new ObjectMapper();
 
   @SuppressWarnings("SpringJavaAutowiredMembersInspection")
   @Autowired
   private EmbeddedKafkaBroker embeddedKafkaBroker;
 
-  private BlockingQueue<ConsumerRecord<String, String>> bookingRequestQueue =
-      new LinkedBlockingQueue<>();
-  private KafkaMessageListenerContainer<String, String> bookingRequestContainer;
-  private BlockingQueue<ConsumerRecord<String, String>> changeLogQueue =
-      new LinkedBlockingQueue<>();
+  private KafkaMessageListenerContainer<String, String> bookingRequestListener;
+  private KafkaMessageListenerContainer<String, String> postingResponseListener;
   private KafkaMessageListenerContainer<String, String> changeLogContainer;
-
   private ConfigurableApplicationContext context;
-  private ObjectMapper objectMapper = new ObjectMapper();
   private Producer<String, String> producer;
 
   private KafkaMessageListenerContainer<String, String> createMessageListener(
@@ -94,7 +102,11 @@ class StreamTest {
   @BeforeEach
   void start() {
     producer = createProducer();
-    bookingRequestContainer = createMessageListener(BOOKING_REQUEST_TOPIC, bookingRequestQueue);
+    // request sink
+    bookingRequestListener = createMessageListener(BOOKING_REQUEST_TOPIC, bookingRequestQueue);
+    // response sink
+    postingResponseListener = createMessageListener(POSTING_RESPONSE_TOPIC, postingResponseQueue);
+    // changelog sink
     changeLogContainer = createMessageListener(CHANGE_LOG_TOPIC, changeLogQueue);
     // spring boot app
     context =
@@ -111,7 +123,8 @@ class StreamTest {
   @AfterEach
   void stop() {
     context.close();
-    bookingRequestContainer.stop();
+    bookingRequestListener.stop();
+    postingResponseListener.stop();
     changeLogContainer.stop();
   }
 
@@ -119,9 +132,8 @@ class StreamTest {
   private void sendPostingRequest(String paymentId, String corrId) {
     var event =
         PostingRequestedEvent.builder()
-            .paymentUID(paymentId)
             .correlationId(corrId)
-            .postingRequest("Posting request for " + paymentId)
+            .payload("Posting request for " + paymentId)
             .build();
     var future =
         producer.send(

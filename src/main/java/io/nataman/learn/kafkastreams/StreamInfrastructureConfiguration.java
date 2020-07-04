@@ -1,5 +1,7 @@
 package io.nataman.learn.kafkastreams;
 
+import static io.nataman.learn.kafkastreams.StreamConfiguration.CORRELATION_STATE_STORE_NAME;
+
 import java.util.Map;
 import java.util.Objects;
 import lombok.extern.log4j.Log4j2;
@@ -12,16 +14,20 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
+import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.StoreBuilder;
+import org.apache.kafka.streams.state.Stores;
 import org.springframework.cloud.stream.binder.kafka.streams.SendToDlqAndContinue;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.KafkaStreamsInfrastructureCustomizer;
 import org.springframework.kafka.config.StreamsBuilderFactoryBeanCustomizer;
 import org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler;
+import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Log4j2
 @Configuration(proxyBeanMethods = false)
-public class StreamInfrastructureConfiguration {
+class StreamInfrastructureConfiguration {
 
   @Bean
   KafkaStreamsInfrastructureCustomizer streamsInfrastructureCustomizer() {

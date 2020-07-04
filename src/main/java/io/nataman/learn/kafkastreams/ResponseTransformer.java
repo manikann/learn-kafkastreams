@@ -2,6 +2,7 @@ package io.nataman.learn.kafkastreams;
 
 import static io.nataman.learn.kafkastreams.StreamConfiguration.CORRELATION_STATE_STORE_NAME;
 
+import java.util.Objects;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Transformer;
@@ -11,8 +12,8 @@ import org.springframework.stereotype.Component;
 
 @Log4j2
 @Component
-class RequestTransformer
-    implements Transformer<String, PostingRequestedEvent, KeyValue<String, BookingRequest>> {
+class ResponseTransformer
+    implements Transformer<String, BookingResponse, KeyValue<String, PostingConfirmedEvent>> {
 
   private KeyValueStore<String, CorrelationEntry> state;
 
@@ -26,28 +27,27 @@ class RequestTransformer
   }
 
   @Override
-  public KeyValue<String, BookingRequest> transform(
-      final String paymentUID, final PostingRequestedEvent postingRequestedEvent) {
-    log.debug("transform: postingRequestedEvent: {}={}", paymentUID, postingRequestedEvent);
-
-    var bookingRequestId = "booking-for-" + paymentUID;
-    var correlationId = postingRequestedEvent.getCorrelationId();
-
-    var bookingRequest =
-        BookingRequest.builder()
-            .bookingRequestId(bookingRequestId)
-            .payload("Booking for " + paymentUID)
-            .build();
+  public KeyValue<String, PostingConfirmedEvent> transform(
+      final String bookingRequestId, final BookingResponse bookingResponse) {
+    log.debug("transform: bookingResponse={}", bookingResponse);
 
     var correlationEntry =
-        CorrelationEntry.builder().correlationId(correlationId).paymentUID(paymentUID).build();
+        Objects.requireNonNull(
+            state.get(bookingRequestId),
+            String.format("Unable to correlate bookingResponse '%s'", bookingResponse));
 
     log.debug("stateStore: key={}, value={}", bookingRequestId, correlationEntry);
-    state.put(bookingRequestId, correlationEntry);
-    log.debug("transformed: {}", bookingRequest);
 
-    // change the key to bookingRequestId
-    return KeyValue.pair(bookingRequestId, bookingRequest);
+    var postingConfirmedEvent =
+        PostingConfirmedEvent.builder()
+            .status(bookingResponse.getStatus())
+            .correlationId(correlationEntry.getCorrelationId())
+            .payload(
+                "Response received for " + bookingRequestId + ", correlation " + correlationEntry)
+            .build();
+
+    log.debug("transformed: {}", postingConfirmedEvent);
+    return KeyValue.pair(correlationEntry.getPaymentUID(), postingConfirmedEvent);
   }
 
   @Override

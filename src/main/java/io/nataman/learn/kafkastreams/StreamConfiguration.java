@@ -1,14 +1,12 @@
 package io.nataman.learn.kafkastreams;
 
-import java.time.Instant;
 import java.util.function.Function;
-import lombok.Builder;
-import lombok.Builder.Default;
-import lombok.Value;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.ValueTransformer;
+import org.apache.kafka.streams.kstream.Named;
+import org.apache.kafka.streams.kstream.Transformer;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
@@ -18,16 +16,36 @@ import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Log4j2
 @Configuration(proxyBeanMethods = false)
-public class StreamConfiguration {
+class StreamConfiguration {
 
-  public static final String CORRELATION_STATE_STORE_NAME = "correlation-store";
+  static final String CORRELATION_STATE_STORE_NAME = "correlation-store";
+  static final String REQUEST_TRANSFORMER_PROCESSOR = "requestTransformer";
+  static final String RESPONSE_TRANSFORMER_PROCESSOR = "responseTransformer";
 
   // this has to be public, for spring to interrogate this method
   @Bean
-  public Function<KStream<String, PostingRequestedEvent>, KStream<String, BookingRequestedEvent>>
-      sendRequestToBooking(
-          ValueTransformer<PostingRequestedEvent, BookingRequestedEvent> requestTransformer) {
-    return input -> input.transformValues(() -> requestTransformer, CORRELATION_STATE_STORE_NAME);
+  public Function<KStream<String, PostingRequestedEvent>, KStream<String, BookingRequest>>
+      requestToBooking(
+          Transformer<String, PostingRequestedEvent, KeyValue<String, BookingRequest>>
+              requestTransformer) {
+    return input ->
+        input.transform(
+            () -> requestTransformer,
+            Named.as(REQUEST_TRANSFORMER_PROCESSOR),
+            CORRELATION_STATE_STORE_NAME);
+  }
+
+  // this has to be public, for spring to interrogate this method
+  @Bean
+  public Function<KStream<String, BookingResponse>, KStream<String, PostingConfirmedEvent>>
+      responseFromBooking(
+          Transformer<String, BookingResponse, KeyValue<String, PostingConfirmedEvent>>
+              responseTransformer) {
+    return input ->
+        input.transform(
+            () -> responseTransformer,
+            Named.as(RESPONSE_TRANSFORMER_PROCESSOR),
+            CORRELATION_STATE_STORE_NAME);
   }
 
   @Bean
@@ -37,29 +55,4 @@ public class StreamConfiguration {
         Serdes.String(),
         new JsonSerde<>());
   }
-}
-
-@Value
-@Builder
-class PostingRequestedEvent {
-  @Default long eventTime = Instant.now().toEpochMilli();
-  String paymentUID;
-  String correlationId;
-  String postingRequest;
-}
-
-@Value
-@Builder
-class BookingRequestedEvent {
-  @Default long eventTime = Instant.now().toEpochMilli();
-  String paymentUID;
-  String bookingRequestId;
-  String bookingRequest;
-}
-
-@Value
-@Builder
-class CorrelationEntry {
-  String paymentUID;
-  String correlationId;
 }
