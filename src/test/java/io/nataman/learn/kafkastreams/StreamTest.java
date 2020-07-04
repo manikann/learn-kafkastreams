@@ -138,7 +138,7 @@ class StreamTest {
   @SneakyThrows
   private void dumpRecords(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue, int expectedCount) {
-    var record = queue.poll(1, TimeUnit.SECONDS);
+    var record = queue.poll(2, TimeUnit.SECONDS);
     assertThat(record).isNotNull();
     log.debug("\nTOPIC: {}\n{}: {}", topicName, record.key(), record.value());
   }
