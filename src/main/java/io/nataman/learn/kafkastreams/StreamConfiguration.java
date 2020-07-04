@@ -36,7 +36,7 @@ class StreamConfiguration {
           input.map(bookingRequestMapper, Named.as("booking-request-mapper"));
       bookingRequestStream
           .map(requestCorrelationMapper, Named.as("request-correlation-mapper"))
-          .to(CORRELATION_TOPIC, Produced.valueSerde(jsonSerde));
+          .to(CORRELATION_TOPIC);
       return bookingRequestStream.selectKey(
           (key, value) -> value.getBookingRequestId(), Named.as("select-key-booking-id"));
     };

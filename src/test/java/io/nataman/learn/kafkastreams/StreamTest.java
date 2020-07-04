@@ -34,7 +34,6 @@ import org.springframework.kafka.listener.KafkaMessageListenerContainer;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
-import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
@@ -95,7 +94,7 @@ class StreamTest {
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
     container.setupMessageListener((MessageListener<String, String>) queue::add);
     container.start();
-    ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+    // ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
     return container;
   }
 
@@ -130,10 +129,10 @@ class StreamTest {
 
   @AfterEach
   void stop() {
-    context.close();
     bookingRequestListener.stop();
     postingResponseListener.stop();
     correlationLogListener.stop();
+    context.close();
   }
 
   @SneakyThrows
@@ -148,10 +147,9 @@ class StreamTest {
       String topicName,
       LinkedTransferQueue<ConsumerRecord<String, String>> queue,
       int minExpectedCount) {
-
     await()
-        .atMost(20, TimeUnit.SECONDS)
-        .pollInterval(Duration.ofSeconds(1))
+        .atMost(2, TimeUnit.SECONDS)
+        .pollInterval(Duration.ofMillis(200))
         .until(
             () -> {
               log.debug(
@@ -164,7 +162,7 @@ class StreamTest {
     queue.forEach(
         record ->
             log.debug(
-                "\n\n-------  TOPIC: {}-{}-{}--------\n  Time: {}\n   Key: {}\n Value: {}\nHeader: {}",
+                "\n-------  TOPIC: {}-{}-{}--------\n  Time: {}\n   Key: {}\n Value: {}\nHeader: {}\n",
                 topicName,
                 record.partition(),
                 record.offset(),
@@ -202,7 +200,7 @@ class StreamTest {
     var result = future.get(1, TimeUnit.SECONDS);
     assertThat(result).isNotNull();
     log.debug(
-        "\n------------ TEST DATA {}-{}-{} ----\n    Time: {}\n     Key: {}\n   Value: {}",
+        "\n------------ TEST DATA {}-{}-{} ----\n    Time: {}\n     Key: {}\n   Value: {}\n",
         result.topic(),
         result.partition(),
         result.offset(),
@@ -220,7 +218,6 @@ class StreamTest {
     var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
     sendBookingResponse(bookingRequest.getBookingRequestId());
     assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
-    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 0);
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 2);
   }
-
 }
