@@ -175,18 +175,6 @@ class StreamTest {
   }
 
   @SneakyThrows
-  @Test
-  void contextLoaded() {
-    sendPostingRequestEvent("payment-1", "corr-1");
-    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
-    assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
-    var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
-    sendBookingResponse(bookingRequest.getBookingRequestId());
-    assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
-    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 0);
-  }
-
-  @SneakyThrows
   private void sendPostingRequestEvent(String paymentId, String corrId) {
     var event =
         PostingRequestedEvent.builder()
@@ -222,4 +210,17 @@ class StreamTest {
         key,
         value);
   }
+
+  @SneakyThrows
+  @Test
+  void contextLoaded() {
+    sendPostingRequestEvent("payment-1", "corr-1");
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
+    assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
+    var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
+    sendBookingResponse(bookingRequest.getBookingRequestId());
+    assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 0);
+  }
+
 }
