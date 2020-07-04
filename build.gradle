@@ -23,7 +23,11 @@ ext {
 }
 
 dependencies {
+    implementation 'com.google.guava:guava:28.0-jre'
+    implementation 'org.apache.commons:commons-lang3:3.10'
+    implementation 'org.jooq:jool:0.9.14'
     implementation 'io.vavr:vavr:0.10.3'
+
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.apache.kafka:kafka-streams'

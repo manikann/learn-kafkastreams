@@ -1,14 +1,29 @@
 package io.nataman.learn.kafkastreams;
 
+import static org.apache.kafka.streams.StreamsConfig.CONSUMER_PREFIX;
+import static org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.EXACTLY_ONCE;
+import static org.apache.kafka.streams.StreamsConfig.PROCESSING_GUARANTEE_CONFIG;
+import static org.apache.kafka.streams.StreamsConfig.PRODUCER_PREFIX;
+import static org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler.KSTREAM_DESERIALIZATION_RECOVERER;
+import static org.springframework.kafka.support.serializer.JsonDeserializer.REMOVE_TYPE_INFO_HEADERS;
+import static org.springframework.kafka.support.serializer.JsonDeserializer.TRUSTED_PACKAGES;
+import static org.springframework.kafka.support.serializer.JsonDeserializer.USE_TYPE_INFO_HEADERS;
+import static org.springframework.kafka.support.serializer.JsonSerializer.ADD_TYPE_INFO_HEADERS;
+
+import com.google.common.collect.ImmutableMap;
 import java.util.Map;
 import java.util.Objects;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaClientSupplier;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
@@ -18,13 +33,31 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.KafkaStreamsInfrastructureCustomizer;
 import org.springframework.kafka.config.StreamsBuilderFactoryBeanCustomizer;
 import org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerde;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 
 @Log4j2
 @Configuration(proxyBeanMethods = false)
 class StreamInfrastructureConfiguration {
+
+  private static final Map<String, Object> STREAM_CONFIG_OVERRIDE =
+      ImmutableMap.<String, Object>builder()
+          .put(PROCESSING_GUARANTEE_CONFIG, EXACTLY_ONCE)
+          .put(DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName())
+          .put(DEFAULT_VALUE_SERDE_CLASS_CONFIG, JsonSerde.class)
+          .put(PRODUCER_PREFIX + ADD_TYPE_INFO_HEADERS, false)
+          .put(
+              PRODUCER_PREFIX + ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
+              AuditProducerInterceptor.class.getName())
+          .put(
+              CONSUMER_PREFIX + ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG,
+              AuditConsumerInterceptor.class.getName())
+          .put(CONSUMER_PREFIX + REMOVE_TYPE_INFO_HEADERS, true)
+          .put(CONSUMER_PREFIX + USE_TYPE_INFO_HEADERS, false)
+          .put(CONSUMER_PREFIX + TRUSTED_PACKAGES, KafkaStreamsApplication.class.getPackageName())
+          .put(
+              CONSUMER_PREFIX + DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
+              RecoveringDeserializationExceptionHandler.class)
+          .build();
 
   @Bean
   KafkaStreamsInfrastructureCustomizer streamsInfrastructureCustomizer() {
@@ -43,25 +76,11 @@ class StreamInfrastructureConfiguration {
       KafkaClientSupplier kafkaClientSupplier,
       SendToDlqAndContinue sendToDlqAndContinue) {
     return factoryBean -> {
-      var streamConfiguration = Objects.requireNonNull(factoryBean.getStreamsConfiguration());
-      streamConfiguration.put(
-          StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE);
-      streamConfiguration.put(
-          StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass().getName());
-      streamConfiguration.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, JsonSerde.class);
-      streamConfiguration.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
-      streamConfiguration.put(JsonDeserializer.REMOVE_TYPE_INFO_HEADERS, true);
-      streamConfiguration.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-      streamConfiguration.put(
-          JsonDeserializer.TRUSTED_PACKAGES, KafkaStreamsApplication.class.getPackageName());
-      streamConfiguration.put(
-          StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
-          RecoveringDeserializationExceptionHandler.class);
-      streamConfiguration.put(
-          RecoveringDeserializationExceptionHandler.KSTREAM_DESERIALIZATION_RECOVERER,
-          sendToDlqAndContinue);
-      log.debug("streamsConfiguration: {}", streamConfiguration);
-      factoryBean.setStreamsConfiguration(streamConfiguration);
+      var configProps = Objects.requireNonNull(factoryBean.getStreamsConfiguration());
+      configProps.putAll(STREAM_CONFIG_OVERRIDE);
+      configProps.put(CONSUMER_PREFIX + KSTREAM_DESERIALIZATION_RECOVERER, sendToDlqAndContinue);
+      log.info("streamsConfiguration: {}", configProps);
+      factoryBean.setStreamsConfiguration(configProps);
       factoryBean.setInfrastructureCustomizer(infrastructureCustomizer);
       factoryBean.setStateRestoreListener(stateRestoreListener);
       factoryBean.setClientSupplier(kafkaClientSupplier);
@@ -117,11 +136,11 @@ class StreamInfrastructureConfiguration {
 
   @Bean
   KafkaClientSupplier wrappedKafkaClientSupplier() {
-    return new WrappedKafkaClientSupplier();
+    return new LoggingKafkaClientSupplier();
   }
 
   @Log4j2
-  static class WrappedKafkaClientSupplier extends DefaultKafkaClientSupplier {
+  static class LoggingKafkaClientSupplier extends DefaultKafkaClientSupplier {
 
     @Override
     public Producer<byte[], byte[]> getProducer(final Map<String, Object> config) {
