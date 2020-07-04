@@ -3,10 +3,12 @@ package io.nataman.learn.kafkastreams;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.vavr.CheckedConsumer;
 import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -31,7 +33,6 @@ import org.springframework.kafka.listener.KafkaMessageListenerContainer;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
-import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
@@ -54,7 +55,8 @@ class StreamTest {
   private static final String CHANGE_LOG_TOPIC = "lks-correlation-store-changelog";
 
   @SuppressWarnings("SpringJavaAutowiredMembersInspection")
-  @Autowired private EmbeddedKafkaBroker embeddedKafkaBroker;
+  @Autowired
+  private EmbeddedKafkaBroker embeddedKafkaBroker;
 
   private BlockingQueue<ConsumerRecord<String, String>> bookingRequestQueue =
       new LinkedBlockingQueue<>();
@@ -67,7 +69,7 @@ class StreamTest {
   private ObjectMapper objectMapper = new ObjectMapper();
   private Producer<String, String> producer;
 
-  private KafkaMessageListenerContainer<String, String> createContainer(
+  private KafkaMessageListenerContainer<String, String> createMessageListener(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue) {
     var consumerProps = KafkaTestUtils.consumerProps("testGroup", "true", embeddedKafkaBroker);
     consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -78,7 +80,7 @@ class StreamTest {
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
     container.setupMessageListener((MessageListener<String, String>) queue::add);
     container.start();
-    //ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+    // ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
     return container;
   }
 
@@ -92,8 +94,8 @@ class StreamTest {
   @BeforeEach
   void start() {
     producer = createProducer();
-    bookingRequestContainer = createContainer(BOOKING_REQUEST_TOPIC, bookingRequestQueue);
-    changeLogContainer = createContainer(CHANGE_LOG_TOPIC, changeLogQueue);
+    bookingRequestContainer = createMessageListener(BOOKING_REQUEST_TOPIC, bookingRequestQueue);
+    changeLogContainer = createMessageListener(CHANGE_LOG_TOPIC, changeLogQueue);
     // spring boot app
     context =
         new SpringApplicationBuilder(KafkaStreamsApplication.class)
@@ -128,7 +130,7 @@ class StreamTest {
     var result = future.get(1, TimeUnit.SECONDS);
     assertThat(result).isNotNull();
     log.debug(
-        "metadata: {} {}-{}-{}",
+        "sendPostingRequest: metadata: {} {}-{}-{}",
         Instant.ofEpochMilli(result.timestamp()),
         result.topic(),
         result.partition(),
@@ -138,9 +140,14 @@ class StreamTest {
   @SneakyThrows
   private void dumpRecords(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue, int expectedCount) {
-    var record = queue.poll(2, TimeUnit.SECONDS);
-    assertThat(record).isNotNull();
-    log.debug("\nTOPIC: {}\n{}: {}", topicName, record.key(), record.value());
+    CheckedConsumer<Integer> readQueue =
+        i -> {
+          var record = queue.poll(2, TimeUnit.SECONDS);
+          assertThat(record).isNotNull();
+          log.debug("\nTOPIC: {}\n{}: {}", topicName, record.key(), record.value());
+        };
+
+    Stream.iterate(0, n -> n++).limit(expectedCount).forEach(readQueue.unchecked());
   }
 
   @SneakyThrows
