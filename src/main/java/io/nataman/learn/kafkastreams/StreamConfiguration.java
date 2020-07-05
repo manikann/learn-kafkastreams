@@ -30,7 +30,7 @@ class StreamConfiguration {
   static final String CORRELATION_TIMEOUT_SINK = "correlation-timeout-sink";
   static final String TIMEOUT_PROCESSOR = "timeout-processor";
   static final String RESPONSE_APPLICATION_ID = "booking-response";
-  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(3);
+  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(2);
 
   // this has to be public, for spring to interrogate this method
   @Bean

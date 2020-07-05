@@ -71,7 +71,8 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
       "booking.posting.response",
       "posting.orchestrator.response",
       "posting-booking-correlation-log"
-    })
+    },
+    controlledShutdown = true)
 class TimeOutTest {
   static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
   static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
@@ -152,6 +153,7 @@ class TimeOutTest {
     bookingRequestListener.stop();
     postingResponseListener.stop();
     correlationLogListener.stop();
+    producer.close();
     context.close();
   }
 
