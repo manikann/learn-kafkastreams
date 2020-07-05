@@ -3,21 +3,25 @@ package io.nataman.learn.kafkastreams;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import lombok.extern.log4j.Log4j2;
+import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.kstream.Joined;
 import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.KeyValueMapper;
+import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Log4j2
 @Configuration(proxyBeanMethods = false)
 class StreamConfiguration {
 
   static final String CORRELATION_TOPIC = "posting-booking-correlation-log";
+  static final String CORRELATION_STATE_STORE_NAME = "correlation-store";
 
   // this has to be public, for spring to interrogate this method
   @Bean
@@ -43,7 +47,7 @@ class StreamConfiguration {
   @Bean
   public BiFunction<
           KStream<String, BookingResponse>,
-          KTable<String, CorrelationEntry>,
+          KStream<String, CorrelationEntry>,
           KStream<String, PostingConfirmedEvent>>
       responseFromBooking(
           final KeyValueMapper<
@@ -54,7 +58,18 @@ class StreamConfiguration {
                   KeyValue<CorrelationEntry, BookingResponse>,
                   KeyValue<String, PostingConfirmedEvent>>
               bookingResponseMapper) {
-    return (bookingResponseStream, correlationEntryTable) -> {
+    return (bookingResponseStream, correlationEntryStream) -> {
+      var correlationStore =
+          Materialized.<String, CorrelationEntry>as(
+                  Stores.inMemoryKeyValueStore(CORRELATION_STATE_STORE_NAME))
+              .withKeySerde(Serdes.String())
+              .withValueSerde(new JsonSerde<>(CorrelationEntry.class))
+              .withCachingEnabled()
+              .withLoggingDisabled();
+
+      var correlationEntryTable =
+          correlationEntryStream.toTable(Named.as("correlation-store"), correlationStore);
+
       var correlatedStream =
           bookingResponseStream.join(
               correlationEntryTable,
