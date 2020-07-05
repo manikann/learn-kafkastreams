@@ -3,21 +3,18 @@ package io.nataman.learn.kafkastreams;
 import io.vavr.Tuple;
 import io.vavr.Tuple2;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KeyValue;
-import org.apache.kafka.streams.kstream.JoinWindows;
 import org.apache.kafka.streams.kstream.Joined;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.kstream.StreamJoined;
+import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,7 +26,10 @@ class StreamConfiguration {
 
   static final String CORRELATION_TOPIC = "posting-booking-correlation-log";
   static final String CORRELATION_STATE_STORE_NAME = "correlation-store";
-  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(5);
+  static final String CORRELATION_TIMEOUT_SINK = "correlation-timeout-sink";
+  static final String TIMEOUT_PROCESSOR = "timeout-processor";
+  static final String RESPONSE_APPLICATION_ID = "booking-response";
+  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(3);
 
   // this has to be public, for spring to interrogate this method
   @Bean
@@ -65,7 +65,8 @@ class StreamConfiguration {
                   String,
                   Tuple2<BookingResponse, CorrelationEntry>,
                   KeyValue<String, PostingConfirmedEvent>>
-              bookingResponseMapper) {
+              bookingResponseMapper,
+          final Processor<String, CorrelationEntry> timeoutProcessor) {
     return (bookingResponseStream, correlationEntryStream) -> {
       // store config
       var correlationStoreMaterialized =
@@ -81,6 +82,11 @@ class StreamConfiguration {
           correlationEntryStream.toTable(
               Named.as("correlation-table"), correlationStoreMaterialized);
 
+      correlationEntryTable
+          .toStream()
+          .process(
+              () -> timeoutProcessor, Named.as(TIMEOUT_PROCESSOR), CORRELATION_STATE_STORE_NAME);
+
       // join the response and correlation table
       var correlatedStream =
           bookingResponseStream.join(
@@ -93,49 +99,6 @@ class StreamConfiguration {
 
       // send response to posting
       return correlatedStream.map(bookingResponseMapper, Named.as("booking-response-mapper"));
-    };
-  }
-
-  @Bean
-  public BiConsumer<KStream<String, CorrelationEntry>, KStream<String, BookingResponse>>
-      timeoutMonitoring() {
-    return (correlationEntryStream, bookingResponseStream) -> {
-      var windowSize = TIMEOUT_DURATION.multipliedBy(2);
-      var retentionSize = windowSize.plus(Duration.ofSeconds(1));
-
-      var correlationEntryWindowStore =
-          Stores.inMemoryWindowStore("timeout-correlation-store", retentionSize, windowSize, true);
-
-      var bookingResponseWindowStore =
-          Stores.inMemoryWindowStore("timeout-booking-response", retentionSize, windowSize, true);
-
-      var alertStreamJoined =
-          StreamJoined.with(
-                  Serdes.String(),
-                  new JsonSerde<>(CorrelationEntry.class),
-                  new JsonSerde<>(BookingResponse.class))
-              .withName("timeout-join")
-              .withStoreName("alert-store")
-              .withThisStoreSupplier(correlationEntryWindowStore)
-              .withOtherStoreSupplier(bookingResponseWindowStore);
-
-      // alert steam
-      correlationEntryStream
-          .leftJoin(
-              bookingResponseStream,
-              Tuple::of,
-              JoinWindows.of(TIMEOUT_DURATION).grace(Duration.ofSeconds(1)),
-              alertStreamJoined)
-          .filter((key, value) -> value._2 == null, Named.as("timeout-filter"))
-          .mapValues((readOnlyKey, value) -> value._1, Named.as("timeout-mapper"))
-          .foreach(
-              (key, value) ->
-                  log.warn(
-                      "Timed out; no response received for paymentUID: {} since {}, correlationEntry: {}",
-                      key,
-                      Instant.ofEpochMilli(value.getEntryTime()),
-                      value),
-              Named.as("alert-action"));
     };
   }
 }

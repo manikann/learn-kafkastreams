@@ -1,5 +1,9 @@
 package io.nataman.learn.kafkastreams;
 
+import static io.nataman.learn.kafkastreams.StreamConfiguration.CORRELATION_TIMEOUT_SINK;
+import static io.nataman.learn.kafkastreams.StreamConfiguration.CORRELATION_TOPIC;
+import static io.nataman.learn.kafkastreams.StreamConfiguration.RESPONSE_APPLICATION_ID;
+import static io.nataman.learn.kafkastreams.StreamConfiguration.TIMEOUT_PROCESSOR;
 import static org.apache.kafka.streams.StreamsConfig.CONSUMER_PREFIX;
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG;
@@ -24,6 +28,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaClientSupplier;
+import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.processor.StateRestoreListener;
 import org.apache.kafka.streams.processor.internals.DefaultKafkaClientSupplier;
@@ -64,6 +69,7 @@ class StreamInfrastructureConfiguration {
     return new KafkaStreamsInfrastructureCustomizer() {
       @Override
       public void configureTopology(final Topology topology) {
+        topology.addSink(CORRELATION_TIMEOUT_SINK, CORRELATION_TOPIC, TIMEOUT_PROCESSOR);
         log.debug("topology: {}", topology.describe());
       }
     };
@@ -81,13 +87,16 @@ class StreamInfrastructureConfiguration {
       configProps.put(CONSUMER_PREFIX + KSTREAM_DESERIALIZATION_RECOVERER, sendToDlqAndContinue);
       log.info("streamsConfiguration: {}", configProps);
       factoryBean.setStreamsConfiguration(configProps);
-      factoryBean.setInfrastructureCustomizer(infrastructureCustomizer);
       factoryBean.setStateRestoreListener(stateRestoreListener);
       factoryBean.setClientSupplier(kafkaClientSupplier);
       factoryBean.setStateListener(
           (newState, oldState) -> log.debug("stateListener: {} -> {}", oldState, newState));
       factoryBean.setUncaughtExceptionHandler(
           (t, e) -> log.error("exception occured; thread={}", t, e));
+      var applicationId = configProps.get(StreamsConfig.APPLICATION_ID_CONFIG);
+      if (RESPONSE_APPLICATION_ID.equals(applicationId)) {
+        factoryBean.setInfrastructureCustomizer(infrastructureCustomizer);
+      }
     };
   }
 

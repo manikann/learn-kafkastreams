@@ -73,11 +73,11 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
       "posting-booking-correlation-log"
     })
 class StreamTest {
-  private static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
-  private static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
-  private static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
-  private static final String BOOKING_RESPONSE_TOPIC = "booking.posting.response";
-  private static final String CORRELATION_LOG_TOPIC = "posting-booking-correlation-log";
+  static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
+  static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
+  static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
+  static final String BOOKING_RESPONSE_TOPIC = "booking.posting.response";
+  static final String CORRELATION_LOG_TOPIC = "posting-booking-correlation-log";
 
   private final LinkedTransferQueue<ConsumerRecord<String, String>> bookingRequestQueue =
       new LinkedTransferQueue<>();
@@ -258,5 +258,18 @@ class StreamTest {
         getObjectFromQueue(postingResponseQueue, PostingConfirmedEvent.class);
     assertThat(postingConfirmedEvent.getCorrelationId())
         .isEqualTo(postingRequestedEvent.getCorrelationId());
+  }
+
+  @SneakyThrows
+  @Test
+  void givenPostingRequest_whenNoBookingResponse_thenTimedOut() {
+    // given
+    var postingRequestedEvent = sendPostingRequestEvent("timeout-payment-1", "timeout-corr-1");
+    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
+    assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
+    await()
+        .atMost(10, TimeUnit.SECONDS)
+        .pollInterval(Duration.ofMillis(100))
+        .until(() -> correlationLogQueue.size() >= 2);
   }
 }
