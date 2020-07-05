@@ -139,6 +139,7 @@ class TimeOutTest {
         new SpringApplicationBuilder(KafkaStreamsApplication.class)
             .web(WebApplicationType.NONE)
             .properties(
+                "spring.jmx.enabled=false",
                 "spring.cloud.stream.kafka.streams.binder.configuration.application.server="
                     + embeddedKafkaBroker.getBrokersAsString(),
                 "spring.cloud.stream.kafka.streams.binder.brokers="
