@@ -1,5 +1,17 @@
 package io.nataman.learn.kafkastreams;
 
+import static org.apache.kafka.clients.CommonClientConfigs.RETRIES_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.consumer.OffsetResetStrategy.EARLIEST;
+import static org.apache.kafka.clients.producer.ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG;
+import static org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG;
+import static org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.common.IsolationLevel.READ_COMMITTED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -8,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
 import lombok.SneakyThrows;
@@ -17,6 +30,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
@@ -86,9 +100,13 @@ class StreamTest {
   private KafkaMessageListenerContainer<String, String> createMessageListener(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue) {
     var consumerProps = KafkaTestUtils.consumerProps("testGroup", "true", embeddedKafkaBroker);
-    consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-    consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-    consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    consumerProps.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    consumerProps.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    consumerProps.put(AUTO_OFFSET_RESET_CONFIG, EARLIEST.toString().toLowerCase());
+    consumerProps.put(ENABLE_AUTO_COMMIT_CONFIG, false);
+    consumerProps.put(ISOLATION_LEVEL_CONFIG, READ_COMMITTED.toString().toLowerCase());
+    consumerProps.put(
+        ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG, AuditConsumerInterceptor.class.getName());
     var cf = new DefaultKafkaConsumerFactory<String, String>(consumerProps);
     ContainerProperties containerProperties = new ContainerProperties(topicName);
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
@@ -100,8 +118,13 @@ class StreamTest {
 
   private Producer<String, String> createProducer() {
     var producerProps = KafkaTestUtils.producerProps(embeddedKafkaBroker);
-    producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-    producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    producerProps.put(KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    producerProps.put(VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    producerProps.put(RETRIES_CONFIG, 3);
+    producerProps.put(ENABLE_IDEMPOTENCE_CONFIG, true);
+    producerProps.put(
+        ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, AuditProducerInterceptor.class.getName());
+    producerProps.put(TRANSACTIONAL_ID_CONFIG, "test-producer");
     return new DefaultKafkaProducerFactory<String, String>(producerProps).createProducer();
   }
 
@@ -189,8 +212,11 @@ class StreamTest {
 
   @SneakyThrows
   private void send(String topic, String key, Object value) {
-    var future =
+    Future<RecordMetadata> future;
+    producer.beginTransaction();
+    future =
         producer.send(new ProducerRecord<>(topic, key, objectMapper.writeValueAsString(value)));
+    producer.commitTransaction();
     var result = future.get(1, TimeUnit.SECONDS);
     assertThat(result).isNotNull();
     log.debug(
