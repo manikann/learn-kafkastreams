@@ -25,10 +25,8 @@ import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
 import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -105,8 +103,6 @@ class StreamTest {
     consumerProps.put(AUTO_OFFSET_RESET_CONFIG, EARLIEST.toString().toLowerCase());
     consumerProps.put(ENABLE_AUTO_COMMIT_CONFIG, false);
     consumerProps.put(ISOLATION_LEVEL_CONFIG, READ_COMMITTED.toString().toLowerCase());
-    consumerProps.put(
-        ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG, AuditConsumerInterceptor.class.getName());
     var cf = new DefaultKafkaConsumerFactory<String, String>(consumerProps);
     ContainerProperties containerProperties = new ContainerProperties(topicName);
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
@@ -122,8 +118,6 @@ class StreamTest {
     producerProps.put(VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     producerProps.put(RETRIES_CONFIG, 3);
     producerProps.put(ENABLE_IDEMPOTENCE_CONFIG, true);
-    producerProps.put(
-        ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, AuditProducerInterceptor.class.getName());
     producerProps.put(TRANSACTIONAL_ID_CONFIG, "test-producer");
     return new DefaultKafkaProducerFactory<String, String>(producerProps).createProducer();
   }
