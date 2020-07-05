@@ -9,8 +9,10 @@ import static org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXC
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.EXACTLY_ONCE;
+import static org.apache.kafka.streams.StreamsConfig.OPTIMIZE;
 import static org.apache.kafka.streams.StreamsConfig.PROCESSING_GUARANTEE_CONFIG;
 import static org.apache.kafka.streams.StreamsConfig.PRODUCER_PREFIX;
+import static org.apache.kafka.streams.StreamsConfig.TOPOLOGY_OPTIMIZATION;
 import static org.springframework.kafka.streams.RecoveringDeserializationExceptionHandler.KSTREAM_DESERIALIZATION_RECOVERER;
 import static org.springframework.kafka.support.serializer.JsonDeserializer.REMOVE_TYPE_INFO_HEADERS;
 import static org.springframework.kafka.support.serializer.JsonDeserializer.TRUSTED_PACKAGES;
@@ -62,6 +64,7 @@ class StreamInfrastructureConfiguration {
           .put(
               CONSUMER_PREFIX + DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
               RecoveringDeserializationExceptionHandler.class)
+          .put(TOPOLOGY_OPTIMIZATION, OPTIMIZE)
           .build();
 
   @Bean
@@ -81,18 +84,25 @@ class StreamInfrastructureConfiguration {
       StateRestoreListener stateRestoreListener,
       KafkaClientSupplier kafkaClientSupplier,
       SendToDlqAndContinue sendToDlqAndContinue) {
+
     return factoryBean -> {
       var configProps = Objects.requireNonNull(factoryBean.getStreamsConfiguration());
       configProps.putAll(STREAM_CONFIG_OVERRIDE);
-      configProps.put(CONSUMER_PREFIX + KSTREAM_DESERIALIZATION_RECOVERER, sendToDlqAndContinue);
+      configProps.put(KSTREAM_DESERIALIZATION_RECOVERER, sendToDlqAndContinue);
       log.info("streamsConfiguration: {}", configProps);
+
       factoryBean.setStreamsConfiguration(configProps);
       factoryBean.setStateRestoreListener(stateRestoreListener);
       factoryBean.setClientSupplier(kafkaClientSupplier);
       factoryBean.setStateListener(
           (newState, oldState) -> log.debug("stateListener: {} -> {}", oldState, newState));
+      /*
       factoryBean.setUncaughtExceptionHandler(
-          (t, e) -> log.error("exception occured; thread={}", t, e));
+          (t, e) -> {
+            log.error("exception occured; thread={}", t, e);
+            throw new RuntimeException(e);
+          });
+       */
       var applicationId = configProps.get(StreamsConfig.APPLICATION_ID_CONFIG);
       if (RESPONSE_APPLICATION_ID.equals(applicationId)) {
         factoryBean.setInfrastructureCustomizer(infrastructureCustomizer);

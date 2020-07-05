@@ -72,7 +72,7 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
       "posting.orchestrator.response",
       "posting-booking-correlation-log"
     })
-class StreamTest {
+class TimeOutTest {
   static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
   static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
   static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
@@ -227,32 +227,14 @@ class StreamTest {
 
   @SneakyThrows
   @Test
-  void givenPostingRequest_whenBookingResponse_thenPostingConfirmedEvent() {
+  void givenPostingRequest_whenNoBookingResponse_thenTimedOut() {
     // given
-    var postingRequestedEvent = sendPostingRequestEvent("payment-1", "corr-1");
-
+    var postingRequestedEvent = sendPostingRequestEvent("timeout-payment-1", "timeout-corr-1");
     assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 1);
     assertSizeAndLogRecord(BOOKING_REQUEST_TOPIC, bookingRequestQueue, 1);
-
-    var bookingRequest = getObjectFromQueue(bookingRequestQueue, BookingRequest.class);
-    var correlationEntry = getObjectFromQueue(correlationLogQueue, CorrelationEntry.class);
-
-    assertThat(bookingRequest.getBookingRequestId())
-        .isEqualTo(postingRequestedEvent.getPaymentUID() + "-b");
-    assertThat(correlationEntry.getCorrelationId())
-        .isEqualTo(postingRequestedEvent.getCorrelationId());
-    assertThat(correlationEntry.getPaymentUID()).isEqualTo(postingRequestedEvent.getPaymentUID());
-
-    // when
-    sendBookingResponse(bookingRequest.getBookingRequestId());
-
-    // then
-    assertSizeAndLogRecord(POSTING_RESPONSE_TOPIC, postingResponseQueue, 1);
-    assertSizeAndLogRecord(CORRELATION_LOG_TOPIC, correlationLogQueue, 2);
-
-    var postingConfirmedEvent =
-        getObjectFromQueue(postingResponseQueue, PostingConfirmedEvent.class);
-    assertThat(postingConfirmedEvent.getCorrelationId())
-        .isEqualTo(postingRequestedEvent.getCorrelationId());
+    await()
+        .atMost(10, TimeUnit.SECONDS)
+        .pollInterval(Duration.ofMillis(100))
+        .until(() -> correlationLogQueue.size() >= 2);
   }
 }

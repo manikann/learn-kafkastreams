@@ -14,6 +14,7 @@ import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
@@ -35,12 +36,13 @@ class StreamConfiguration {
   @Bean
   public Function<KStream<String, PostingRequestedEvent>, KStream<String, BookingRequest>>
       requestToBooking(
-          final KeyValueMapper<
-                  String, PostingRequestedEvent, KeyValue<PostingRequestedEvent, BookingRequest>>
-              bookingRequestMapper,
-          final KeyValueMapper<
-                  PostingRequestedEvent, BookingRequest, KeyValue<String, CorrelationEntry>>
-              requestCorrelationMapper) {
+      final KeyValueMapper<
+          String, PostingRequestedEvent, KeyValue<PostingRequestedEvent, BookingRequest>>
+          bookingRequestMapper,
+      final KeyValueMapper<
+          PostingRequestedEvent, BookingRequest, KeyValue<String, CorrelationEntry>>
+          requestCorrelationMapper,
+      final ValueMapper<BookingRequest, BookingRequest> transactionTestMapper) {
     return input -> {
       var bookingRequestStream =
           input.map(bookingRequestMapper, Named.as("booking-request-mapper"));
@@ -48,7 +50,8 @@ class StreamConfiguration {
           .map(requestCorrelationMapper, Named.as("request-correlation-mapper"))
           .to(CORRELATION_TOPIC, Produced.as("correlation-sink"));
       return bookingRequestStream.selectKey(
-          (key, value) -> value.getBookingRequestId(), Named.as("booking-id-key"));
+          (key, value) -> value.getBookingRequestId(), Named.as("booking-id-key"))
+          .mapValues(transactionTestMapper);
     };
   }
 
