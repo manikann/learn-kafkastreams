@@ -14,6 +14,10 @@ class CorrelationEntryMapper
   @Override
   public KeyValue<String, CorrelationEntry> apply(
       final PostingRequestedEvent postingRequestedEvent, final BookingRequest bookingRequest) {
+    log.debug(
+        "correlationEntryMapper: postingRequestedEvent={}, bookingRequest={}",
+        postingRequestedEvent,
+        bookingRequest);
     var correlationEntry =
         CorrelationEntry.builder()
             .paymentUID(postingRequestedEvent.getPaymentUID())

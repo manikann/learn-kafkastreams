@@ -19,6 +19,11 @@ class BookingResponseMapper
       final String bookingRequestId, final Tuple2<BookingResponse, CorrelationEntry> value) {
     var bookingResponse = value._1;
     var correlationEntry = value._2;
+    log.debug(
+        "bookingResponseMapper: bookingId={}, bookingResponse={}, correlationEntry={}",
+        bookingRequestId,
+        bookingResponse,
+        correlationEntry);
     var postingConfirmedEvent =
         PostingConfirmedEvent.builder()
             .correlationId(correlationEntry.getCorrelationId())

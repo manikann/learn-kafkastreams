@@ -46,7 +46,7 @@ dependencies {
     testImplementation 'org.awaitility:awaitility:4.0.3'
     testImplementation 'org.springframework.cloud:spring-cloud-starter'
     testImplementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
-    testImplementation 'com.playtika.testcontainers:embedded-kafka:1.77'
+    //testImplementation 'com.playtika.testcontainers:embedded-kafka:1.77'
 }
 
 dependencyManagement {

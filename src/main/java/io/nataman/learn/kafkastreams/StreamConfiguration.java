@@ -14,7 +14,6 @@ import org.apache.kafka.streams.kstream.KeyValueMapper;
 import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Named;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.kstream.ValueMapper;
 import org.apache.kafka.streams.processor.Processor;
 import org.apache.kafka.streams.state.Stores;
 import org.springframework.context.annotation.Bean;
@@ -30,19 +29,18 @@ class StreamConfiguration {
   static final String CORRELATION_TIMEOUT_SINK = "correlation-timeout-sink";
   static final String TIMEOUT_PROCESSOR = "timeout-processor";
   static final String RESPONSE_APPLICATION_ID = "booking-response";
-  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(2);
+  static final Duration TIMEOUT_DURATION = Duration.ofSeconds(3);
 
   // this has to be public, for spring to interrogate this method
   @Bean
   public Function<KStream<String, PostingRequestedEvent>, KStream<String, BookingRequest>>
       requestToBooking(
-      final KeyValueMapper<
-          String, PostingRequestedEvent, KeyValue<PostingRequestedEvent, BookingRequest>>
-          bookingRequestMapper,
-      final KeyValueMapper<
-          PostingRequestedEvent, BookingRequest, KeyValue<String, CorrelationEntry>>
-          requestCorrelationMapper,
-      final ValueMapper<BookingRequest, BookingRequest> transactionTestMapper) {
+          final KeyValueMapper<
+                  String, PostingRequestedEvent, KeyValue<PostingRequestedEvent, BookingRequest>>
+              bookingRequestMapper,
+          final KeyValueMapper<
+                  PostingRequestedEvent, BookingRequest, KeyValue<String, CorrelationEntry>>
+              requestCorrelationMapper) {
     return input -> {
       var bookingRequestStream =
           input.map(bookingRequestMapper, Named.as("booking-request-mapper"));
@@ -50,8 +48,7 @@ class StreamConfiguration {
           .map(requestCorrelationMapper, Named.as("request-correlation-mapper"))
           .to(CORRELATION_TOPIC, Produced.as("correlation-sink"));
       return bookingRequestStream.selectKey(
-          (key, value) -> value.getBookingRequestId(), Named.as("booking-id-key"))
-          .mapValues(transactionTestMapper);
+          (key, value) -> value.getBookingRequestId(), Named.as("booking-id-key"));
     };
   }
 
@@ -82,8 +79,10 @@ class StreamConfiguration {
 
       // create in-memory key/value table
       var correlationEntryTable =
-          correlationEntryStream.toTable(
-              Named.as("correlation-table"), correlationStoreMaterialized);
+          correlationEntryStream
+              .peek(
+                  (key, value) -> log.debug("correlationEntryTable: key={}, value={}", key, value))
+              .toTable(Named.as("correlation-table"), correlationStoreMaterialized);
 
       correlationEntryTable
           .toStream()
@@ -92,11 +91,14 @@ class StreamConfiguration {
 
       // join the response and correlation table
       var correlatedStream =
-          bookingResponseStream.join(
-              correlationEntryTable, Tuple::of, Joined.as("correlated-stream"));
+          bookingResponseStream
+              .peek(
+                  (key, value) -> log.debug("bookingResponseStream: key={}, value={}", key, value))
+              .join(correlationEntryTable, Tuple::of, Joined.as("correlated-stream"));
 
       // delete the correlated entry
       correlatedStream
+          .peek((key, value) -> log.debug("correlatedStream: key={}, value={}", key, value))
           .map(correlationDeleteMapper, Named.as("correlation-delete-mapper"))
           .to(CORRELATION_TOPIC, Produced.as("correlation-delete-sink"));
 
