@@ -71,7 +71,8 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
       "posting.booking.request",
       "booking.posting.response",
       "posting.orchestrator.response",
-      "posting.booking.repartition"
+      "posting.booking.repartition",
+      "postingservice-correlation-store-changelog"
     },
     controlledShutdown = true)
 @ActiveProfiles("test")

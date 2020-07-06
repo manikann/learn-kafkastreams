@@ -27,6 +27,7 @@ class StubTest {
   @Qualifier("postingResponseQueue")
   BlockingQueue<PostingConfirmedEvent> postingResponseQueue;
 
+  @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection")
   @Autowired KafkaTemplate<String, PostingRequestedEvent> kafkaTemplate;
 
   @SneakyThrows
