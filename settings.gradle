@@ -1,1 +1,3 @@
-rootProject.name = 'kafkastreams'
+rootProject.name='learn-kafkastreams'
+include 'streams'
+include 'stub'

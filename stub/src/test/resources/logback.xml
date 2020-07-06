@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
+    <withJansi>true</withJansi>
+    <encoder>
+      <pattern>%yellow(%d{HH:mm:ss.SSS}) %highlight(%5p) %cyan(%20.20t) %green(%30.30class{1}) %m%n</pattern>
+    </encoder>
+  </appender>
+  <root level="WARN">
+    <appender-ref ref="stdout"/>
+  </root>
+</configuration>
