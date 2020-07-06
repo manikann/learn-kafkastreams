@@ -36,6 +36,7 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
     annotationProcessor 'org.projectlombok:lombok'
+
     testImplementation('org.springframework.boot:spring-boot-starter-test') {
         exclude group: 'org.junit.vintage', module: 'junit-vintage-engine'
     }
@@ -43,6 +44,8 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.apache.kafka:kafka-streams-test-utils'
     testImplementation 'org.awaitility:awaitility:4.0.3'
+    testImplementation 'org.springframework.cloud:spring-cloud-starter'
+    testImplementation 'com.playtika.testcontainers:embedded-kafka:1.77'
 }
 
 dependencyManagement {
