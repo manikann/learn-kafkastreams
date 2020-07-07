@@ -17,10 +17,10 @@ public class BookingResponseTransformer
   private ProcessorContext context;
   private KeyValueStore<String, ValueAndTimestamp<PostingRequestedEvent>> stateStore;
 
+  @SuppressWarnings("unchecked")
   @Override
   public void init(final ProcessorContext context) {
     this.context = context;
-    //noinspection unchecked
     stateStore =
         (KeyValueStore<String, ValueAndTimestamp<PostingRequestedEvent>>)
             context.getStateStore(StreamConfiguration.CORRELATION_STATE_STORE_NAME);
@@ -30,7 +30,7 @@ public class BookingResponseTransformer
   @Override
   public KeyValue<String, PostingConfirmedEvent> transform(
       final String bookingRequestId, final BookingResponse bookingResponse) {
-
+    log.debug("transform: request={}, headers={}", bookingResponse, context.headers());
     var correlatedRecord = Objects.requireNonNull(stateStore.get(bookingRequestId));
     var postingRequestedEvent = correlatedRecord.value();
     log.debug("stateStore: bookingRequestId={}, {}", bookingRequestId, correlatedRecord);

@@ -1,15 +1,14 @@
 package io.nataman.learn.kafkastreams;
 
+import static org.apache.kafka.clients.CommonClientConfigs.CLIENT_ID_CONFIG;
 import static org.apache.kafka.clients.CommonClientConfigs.RETRIES_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
-import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.clients.consumer.OffsetResetStrategy.EARLIEST;
 import static org.apache.kafka.clients.producer.ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG;
 import static org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG;
-import static org.apache.kafka.clients.producer.ProducerConfig.TRANSACTIONAL_ID_CONFIG;
 import static org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG;
 import static org.apache.kafka.common.IsolationLevel.READ_COMMITTED;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,7 +19,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
 import lombok.SneakyThrows;
@@ -28,34 +26,33 @@ import lombok.extern.log4j.Log4j2;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.builder.SpringApplicationBuilder;
-import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.KafkaMessageListenerContainer;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
 
-@SuppressWarnings("SameParameterValue")
-@Log4j2
-@ExtendWith(SpringExtension.class)
+@SpringBootTest(
+    webEnvironment = WebEnvironment.NONE,
+    properties = {"spring.cloud.stream.kafka.binder.brokers=localhost:9192"})
 @DirtiesContext
 @EmbeddedKafka(
+    ports = 9192,
     partitions = 1,
     brokerProperties = {
       "transaction.state.log.replication.factor=1",
@@ -76,7 +73,8 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
     },
     controlledShutdown = true)
 @ActiveProfiles("test")
-class StreamTest {
+@Log4j2
+class EmbeddedKafkaStreamTest {
   static final String POSTING_REQUEST_TOPIC = "orchestrator.posting.request";
   static final String POSTING_RESPONSE_TOPIC = "posting.orchestrator.response";
   static final String BOOKING_REQUEST_TOPIC = "posting.booking.request";
@@ -88,14 +86,14 @@ class StreamTest {
       new LinkedTransferQueue<>();
   private final ObjectMapper objectMapper = new ObjectMapper();
 
-  @SuppressWarnings("SpringJavaAutowiredMembersInspection")
+  @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection")
   @Autowired
   private EmbeddedKafkaBroker embeddedKafkaBroker;
 
   private KafkaMessageListenerContainer<String, String> bookingRequestListener;
   private KafkaMessageListenerContainer<String, String> postingResponseListener;
-  private ConfigurableApplicationContext context;
   private Producer<String, String> producer;
+  private ProducerFactory<String, String> producerFactory;
 
   private KafkaMessageListenerContainer<String, String> createMessageListener(
       String topicName, BlockingQueue<ConsumerRecord<String, String>> queue) {
@@ -103,46 +101,34 @@ class StreamTest {
     consumerProps.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(AUTO_OFFSET_RESET_CONFIG, EARLIEST.toString().toLowerCase());
-    consumerProps.put(ENABLE_AUTO_COMMIT_CONFIG, false);
     consumerProps.put(ISOLATION_LEVEL_CONFIG, READ_COMMITTED.toString().toLowerCase());
     var cf = new DefaultKafkaConsumerFactory<String, String>(consumerProps);
     ContainerProperties containerProperties = new ContainerProperties(topicName);
     var container = new KafkaMessageListenerContainer<>(cf, containerProperties);
     container.setupMessageListener((MessageListener<String, String>) queue::add);
     container.start();
-    // ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
+    ContainerTestUtils.waitForAssignment(container, embeddedKafkaBroker.getPartitionsPerTopic());
     return container;
   }
 
-  private Producer<String, String> createProducer() {
+  private ProducerFactory<String, String> createProducer() {
     var producerProps = KafkaTestUtils.producerProps(embeddedKafkaBroker);
     producerProps.put(KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     producerProps.put(VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     producerProps.put(RETRIES_CONFIG, 3);
     producerProps.put(ENABLE_IDEMPOTENCE_CONFIG, true);
-    producerProps.put(TRANSACTIONAL_ID_CONFIG, "test-producer");
-    return new DefaultKafkaProducerFactory<String, String>(producerProps).createProducer();
+    return new DefaultKafkaProducerFactory<>(producerProps);
   }
 
   @SneakyThrows
   @BeforeEach
   void start() {
-    producer = createProducer();
+    producerFactory = createProducer();
+    producer = producerFactory.createProducer();
     // request sink
     bookingRequestListener = createMessageListener(BOOKING_REQUEST_TOPIC, bookingRequestQueue);
     // response sink
     postingResponseListener = createMessageListener(POSTING_RESPONSE_TOPIC, postingResponseQueue);
-    // spring boot app
-    context =
-        new SpringApplicationBuilder(KafkaStreamsApplication.class)
-            .web(WebApplicationType.NONE)
-            .properties(
-                "spring.jmx.enabled=false",
-                "spring.cloud.stream.kafka.streams.binder.configuration.application.server="
-                    + embeddedKafkaBroker.getBrokersAsString(),
-                "spring.cloud.stream.kafka.streams.binder.brokers="
-                    + embeddedKafkaBroker.getBrokersAsString())
-            .run();
   }
 
   @AfterEach
@@ -150,7 +136,7 @@ class StreamTest {
     bookingRequestListener.stop();
     postingResponseListener.stop();
     producer.close();
-    context.close();
+    producerFactory.reset();
   }
 
   @SneakyThrows
@@ -207,11 +193,8 @@ class StreamTest {
 
   @SneakyThrows
   private void send(String topic, String key, Object value) {
-    Future<RecordMetadata> future;
-    producer.beginTransaction();
-    future =
+    var future =
         producer.send(new ProducerRecord<>(topic, key, objectMapper.writeValueAsString(value)));
-    producer.commitTransaction();
     var result = future.get(1, TimeUnit.SECONDS);
     assertThat(result).isNotNull();
     log.debug(
